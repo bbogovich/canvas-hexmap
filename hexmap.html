@@ -1,0 +1,395 @@
+<!DOCTYPE HTML>
+<html>
+	<head>
+		<title></title>
+		<meta http-equiv="X-UA-Compatible" content="IE=9" />
+		<style>
+#canvas1{
+	border: 1px black solid;
+	width: 1000px;
+	height: 500px;
+	float:left;
+}
+#mapMouseCoordTracker{
+	display:none;
+}
+#mapToolbar{
+	float:left;
+}
+#mapToolbar button{
+	display: block;
+	width: 25px;
+	height: 25px;
+	text-align: center;
+}
+div.clear{
+	clear:both
+}
+		</style>
+		<script>
+var Viewport = {
+	xmin:0,
+	ymin:0,
+	width:1000,
+	height:500,
+	scale: 50
+}
+var map = {
+	tilesize: 10, //tile bounding box is 10x10
+	xmin: 0,
+	ymin: 0,
+	xmax: 25,
+	ymax: 25
+}
+/*
+ * draws a hex to the rendering context
+ * ctx: 2D canvas context
+ * column Number: hex column
+ * row Number: hex row
+ * scale Number: length of one side of a hex
+ * fill Boolean: fill the hex interior
+ * showCoords Boolean: display the hex coordinates
+ */
+function drawHex(ctx,column,row,scale,fill,showCoords){
+	//if(x%2!=y%2) return;
+	var yoffset = 0.5*Math.sqrt(3);
+	var xscaled = column*scale;
+	var yscaled = row*scale;
+	var yoffsetScaled = Math.floor(0.5*Math.sqrt(3)*scale);
+	//center of hex cells are 2 units apart
+	var centerX=column*scale*1.5;;
+	var centerY;
+	if(column%2){ //odd numbered columns
+		centerY = row*scale*yoffset*2;
+	}else{
+		centerY = row*scale*yoffset*2+0.5*scale*Math.sqrt(3);
+	}
+	var unitPoints = [
+		{x:-1,y:0},
+		{x:-0.5,y:yoffset},
+		{x:0.5,y:yoffset},
+		{x:1,y:0},
+		{x:0.5,y:-1*yoffset},
+		{x:-0.5,y:-1*yoffset}
+	];
+	var scaledPoints = [
+		{x:centerX+unitPoints[0]["x"]*scale,y:centerY+unitPoints[0]["y"]*scale},
+		{x:centerX+unitPoints[1]["x"]*scale,y:centerY+unitPoints[1]["y"]*scale},
+		{x:centerX+unitPoints[2]["x"]*scale,y:centerY+unitPoints[2]["y"]*scale},
+		{x:centerX+unitPoints[3]["x"]*scale,y:centerY+unitPoints[3]["y"]*scale},
+		{x:centerX+unitPoints[4]["x"]*scale,y:centerY+unitPoints[4]["y"]*scale},
+		{x:centerX+unitPoints[5]["x"]*scale,y:centerY+unitPoints[5]["y"]*scale}
+	];
+	ctx.beginPath();
+	ctx.moveTo(scaledPoints[0]["x"],scaledPoints[0]["y"]);
+	ctx.lineTo(scaledPoints[1]["x"],scaledPoints[1]["y"]);
+	ctx.lineTo(scaledPoints[2]["x"],scaledPoints[2]["y"]);
+	ctx.lineTo(scaledPoints[3]["x"],scaledPoints[3]["y"]);
+	ctx.lineTo(scaledPoints[4]["x"],scaledPoints[4]["y"]);
+	ctx.lineTo(scaledPoints[5]["x"],scaledPoints[5]["y"]);
+	ctx.closePath();
+	ctx.stroke();
+	if(fill){
+		ctx.fill();
+	}
+	if(showCoords&&scale>25){
+		var oldFill=ctx.fillStyle;
+		ctx.fillStyle=ctx.strokeStyle;
+		ctx.textAlign="center";
+		ctx.fillText((column>9?"":"0")+column+(row>9?"":"0")+row,centerX,centerY-unitPoints[1]["y"]*scale+20);
+		ctx.fillStyle=oldFill;
+	}
+}
+/*
+ * returns the hex map coordinate (ccrr) for the provided screen coordinates
+ * at the specified scale based on a top-left origin
+ * scale represents the length of one side of a hex
+ */
+function getHexCoordinate(x,y,scale){
+	var baseRowHeight = scale*0.5*Math.sqrt(3); //half height of a hex
+	var subrow = Math.floor((y)/baseRowHeight);
+	var subcol = Math.floor(x/(scale*0.5));
+	var r1 = subrow%2;
+	var r=0,c=0;
+	var r=subrow;
+	var subx = 0;
+	var suby = 0;
+	var baseColWidth = scale*1.5; //width of center rectangle in a hex plus one side
+	var c1 = (x+scale)/baseColWidth;  //add scale to x because the center of origin hex is at 0,0
+	var c1Rounded=Math.floor(c1);
+	var esty=0;
+	if(c1-c1Rounded<=0.333333333333){//ambiguous, value is either Math.Floor(c1) or Math.floor(c1)-1
+		subx = x-subcol*scale*0.5;
+		suby = Math.floor(y-subrow*baseRowHeight);
+
+		c=(c1Rounded-1)+" or "+c1Rounded;
+		//even subrow leans left, odd leans right
+		//slope is 0.5*scale; negative for left leaning, positive for right
+		if(subrow%2){
+			esty=Math.floor(baseRowHeight-(subx*baseRowHeight/0.5)/scale);
+			if(suby>esty){
+				c=Math.floor(c1);
+			}else{
+				c=Math.floor(c1)-1;
+			}
+		}
+		else{
+			esty=Math.floor((subx*baseRowHeight/0.5)/scale);
+			if(suby>esty){
+				c=Math.floor(c1);
+			}else{
+				c=Math.floor(c1)-1;
+			}
+		}
+	}
+	else{
+		c=c1Rounded;
+	}
+	//adjust row numbers
+	
+	if(c%2){
+		r=Math.floor(subrow/2)+subrow%2;
+	}else{
+		if(subrow%2)
+			r=subrow-1;
+		else
+			r=subrow;
+		//r=r/2;
+		r=(subrow%2?subrow-1:subrow)/2;
+		
+	}
+	return {r:r,c:c,subrow:subrow,subcol:subcol,subx:subx,suby:suby,esty:esty};
+}
+
+function drawMap(){
+	var canvasEle = document.getElementById("canvas1");
+	var ctx = canvasEle.getContext("2d");
+	ctx.fillStyle="#000000";
+	ctx.fillRect(0,0,canvasEle.width,canvasEle.height);
+	ctx.lineWidth = 1;
+	ctx.strokeStyle = "#FFFFFF";
+	ctx.textColor="#FFFFFF";
+	
+	for (var i=0;i<20;i++){
+		for (var j=0;j<20;j++){
+			drawHex(ctx,i,j,Viewport.scale,false,true);
+		}
+	}
+	drawPositionTest();
+}
+
+/*
+ * Draw a representation of the upper-left hex at 0101 and surrounding
+ * hexes.
+ */
+function drawPositionTest(){
+	var positionTest = document.getElementById("mapMouseCoordTracker");
+	var scale = Viewport.scale;
+	var width = (3)*scale;
+	var height = 2*Math.sqrt(3)*scale;
+	positionTest.width=width;
+	positionTest.height=height;
+	var ctx = positionTest.getContext("2d");
+	ctx.fillStyle="#000000";
+	ctx.fillRect(0,0,Viewport.scale*4,height);
+	ctx.lineWidth = 0;
+	ctx.strokeStyle = "#FFFFFF";
+	ctx.textColor="#000000";
+	ctx.fillStyle="#FF0000";
+	drawHex(ctx,0,0,Viewport.scale,true,false);
+	ctx.fillStyle="#00FF00";
+	drawHex(ctx,1,0,Viewport.scale,true,false);
+	ctx.fillStyle="#0000FF";
+	drawHex(ctx,2,0,Viewport.scale,true,false);
+	ctx.fillStyle="#00FFFF";
+	drawHex(ctx,2,1,Viewport.scale,true,false);
+	ctx.fillStyle="#FF00FF";
+	drawHex(ctx,1,2,Viewport.scale,true,false);
+	ctx.fillStyle="#FFFF00";
+	drawHex(ctx,0,1,Viewport.scale,true,false);
+	ctx.fillStyle="#FFFFFF";
+	drawHex(ctx,1,1,Viewport.scale,true,false);
+}
+
+/*
+ * Determine the hex-map coordinate using a color map of the scaled unit hex
+ * and surrounding hexes.
+ *
+ * 1) translate coordinates to be relative to hex at 0101
+ * 2) Check color value in the mapMouseCoordTracker canvas
+ * Tested successfully in Safari, Opera, Chrome, IE9 and FF 10
+*/
+function getHexCoordinate3(x,y,scale){
+	//console.log(x+","+y+","+scale);
+	//console.log(Viewport);
+	var yoffset = Math.floor(0.5*Math.sqrt(3)*scale);
+	var r=0,c=0,subrow=0,subcol=0,subx=0,suby=0,estx=0,esty=0;
+	
+	var absoluteX = x+Viewport.xmin;
+	var absoluteY = y+Viewport.ymin;
+	var positionMask = document.getElementById("mapMouseCoordTracker");
+	
+	var positionMaskWidth = positionMask.width;
+	var positionMaskHeight = positionMask.height;
+	
+	var positionOffsetX = absoluteX % positionMaskWidth;
+	var positionOffsetY = absoluteY % positionMaskHeight;
+	var baseX = Math.floor(absoluteX / positionMaskWidth);
+	var baseY = Math.floor(absoluteY / positionMaskHeight);
+	var subrow = baseX;
+	var subcol = baseY;
+	var subx = positionOffsetX;
+	var subx = positionOffsetY;
+	
+	var rootX = baseX*2+1;
+	var rootY = baseY*2+1;
+
+	var ctx = positionMask.getContext("2d");
+	//ctx.fillStyle = "#000000";
+	//ctx.fillRect(positionOffsetX,positionOffsetY,1,1);
+	//console.log(positionOffsetX);
+	//console.log(positionOffsetY);
+	var data = ctx.getImageData(positionOffsetX,positionOffsetY,1,1);
+	var red=data.data[0];
+	var green=data.data[1];
+	var blue=data.data[2];
+	r=rootY;
+	c=rootX;
+	if(red==255&&green==0&&blue==0){  //upper left
+		r=rootY-1;
+		c=rootX-1;
+	} else if(red==0&&green==255&&blue==0){  //upper center
+		r=rootY-1;
+	} else if(red==0&&green==0&&blue==255){  //upper right
+		c=rootX+1;
+		r=rootY-1;
+	} else if(red==0&&green==255&&blue==255){  //lower right
+		c=rootX+1;
+	} else if(red==255&&green==0&&blue==255){  //lower center
+		r=rootY+1;
+	} else if(red==255&&green==255&&blue==0){  //lower left
+		c=rootX-1;
+	}
+	//console.log(data);
+	return {r:r,c:c,subrow:subrow,subcol:subcol,subx:subx,suby:suby,esty:esty,color:"rgba("+red+","+green+","+blue+",255)"};
+}
+
+function init(){
+	var canvasEle = document.getElementById("canvas1");
+	var ctx = canvasEle.getContext("2d");
+	ctx.font="14px monospace";
+	drawMap();
+	document.getElementById("canvas1").addEventListener("mousemove",function(e){
+		//console.log(e);
+		var x=0,y=0;
+		if(typeof(e.offsetX)=="undefined"||typeof(e.offsetY)=="undefined") { //DAMM YOU FIREFOX
+			var mozLeft=e.clientX;
+			var mozTop=e.clientY;
+			var target=e.target;
+			mozLeft = mozLeft - target.offsetLeft;
+			mozTop = mozTop - target.offsetTop;
+			var parent = target.offsetParent;
+			while(parent){
+				mozLeft = mozLeft - parent.offsetLeft;
+				mozTop = mozTop - parent.offsetTop;
+				parent = parent.offsetParent;
+			}
+			x = mozLeft;
+			y = mozTop;
+		}else{
+			x=e.offsetX;
+			y=e.offsetY;
+		}
+		console.log(x+","+y);
+		document.getElementById("coordx").innerHTML=x;
+		document.getElementById("coordy").innerHTML=y;
+		var mapCoords = getHexCoordinate3(x,y,Viewport.scale);
+		document.getElementById("coordr").innerHTML=mapCoords.r;
+		document.getElementById("coordc").innerHTML=mapCoords.c;
+		document.getElementById("coordsubr").innerHTML=mapCoords.subrow;
+		document.getElementById("coordsubc").innerHTML=mapCoords.subcol;
+		document.getElementById("coordsubx").innerHTML=mapCoords.subx;
+		document.getElementById("coordsuby").innerHTML=mapCoords.suby;
+		document.getElementById("coordesty").innerHTML=mapCoords.esty;
+		document.getElementById("coordColor").innerHTML=mapCoords.color;
+		document.getElementById("hexcoordinate").innerHTML = (mapCoords.c<10?"0":"")+mapCoords.c+(mapCoords.r<10?"0":"")+mapCoords.r;
+		ctx.lineWidth = 0;
+		ctx.fillStyle=mapCoords.color;
+		ctx.fillRect(x,y,1,1);
+	},false);
+	document.getElementById("canvas1").addEventListener("click",function(e){
+		drawMap();
+	})
+}
+
+function onIncreaseScaleButtonClick(){
+	Viewport.scale+=5;
+	drawMap();
+}
+function onDecreaseScaleButtonClick(){
+	if(Viewport.scale>10){
+		Viewport.scale-=5;
+	}
+	drawMap();
+}
+/*
+ * coordinate test validation:
+ * - overlay position test colors over the entire map.
+ * This may trigger "slow script" warnings in IE and Firefox.
+ */
+function drawPositionOverlayMap(){
+	var canvasEle = document.getElementById("canvas1");
+	var ctx = canvasEle.getContext("2d");
+	var width = canvasEle.width;
+	var height = canvasEle.height;
+	ctx.lineWidth = 0;
+	for (var i=0;i<width;i++){
+		for (var j=0;j<height;j++){
+			var mapCoords = getHexCoordinate3(i,j,Viewport.scale);
+			ctx.fillStyle=mapCoords.color;
+			ctx.fillRect(i,j,1,1);
+		}
+	}
+	ctx.lineWidth = 1;
+	ctx.strokeStyle = "#000000";
+	ctx.textColor="#000000";
+	for (var i=0;i<20;i++){
+		for (var j=0;j<20;j++){
+			drawHex(ctx,i,j,Viewport.scale,false,true);
+		}
+	}
+
+}
+function toggleTracker(){
+	var ele = document.getElementById("mapMouseCoordTracker");
+	var style=ele.style.display;
+	console.log(ele.style);
+	console.log(ele.style.display);
+	ele.style.display=(style=="block"?"none":"block");
+}
+		</script>
+	</head>
+	<body onload="init()">
+		<canvas id="canvas1" width="1000px" height="500"></canvas>
+		<div id="mapToolbar">
+			<button onclick="onIncreaseScaleButtonClick()">+</button>
+			<button onclick="onDecreaseScaleButtonClick()">-</button>
+		</div>
+		<div class="clear coords">
+			<span id="hexcoordinate"></span>
+			(x:<span id="coordx"></span>,&nbsp;y:<span id="coordy"></span>)
+			(r:<span id="coordr"></span>,&nbsp;c:<span id="coordc"></span>)
+			(subrow:<span id="coordsubr"></span>,&nbsp;subcol:<span id="coordsubc"></span>)
+			(subx:<span id="coordsubx"></span>,&nbsp;suby:<span id="coordsuby"></span>)
+			esty:<span id="coordesty"></span>
+			mask color: <span id="coordColor"></span>
+		</div>
+		<div>
+			<button onclick="drawPositionOverlayMap()">Draw Position Overlay Map</button>
+		</div>
+		<div>
+			<button onclick="toggleTracker()">Show/Hide Position Tracker</button>
+			<canvas id="mapMouseCoordTracker"></canvas>
+		</div>
+	</body>
+</html>
