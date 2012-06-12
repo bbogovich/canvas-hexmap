@@ -1,0 +1,307 @@
+<!DOCTYPE HTML>
+<html>
+	<head>
+		<title>HexMap Demo</title>
+		<meta http-equiv="X-UA-Compatible" content="IE=9" />
+		<script src="./hexmap.js"></script>
+		<style>
+#canvas1{
+	border: 1px black solid;
+	width: 500px;
+	height: 300px;
+	float:left;
+}
+
+#mapToolbar{
+	float:left;
+}
+#mapToolbar button{
+	display: block;
+	width: 25px;
+	height: 25px;
+	text-align: center;
+}
+div.clear{
+	clear:both
+}
+tbody th{
+	text-align: left;
+}
+		</style>
+		<script>
+var Viewport = {
+	xmin:0,
+	ymin:0,
+	width:500,
+	height:300,
+	scale: 50,
+	offsetx:0,
+	offsety:0,
+	maxwidth:10000,
+	maxheight:10000
+}
+var InputQueue=[];
+var InputStatus={
+	upButtonPressed:false,
+	downButtonPressed:false,
+	rightButtonPressed:false,
+	leftButtonPressed:false
+};
+function clearInputStatusButtons(){
+	with(InputStatus){
+		upButtonPressed=false;
+		downButtonPressed=false;
+		rightButtonPressed=false;
+		leftButtonPressed=false;
+	}
+}
+var baseMap;
+
+function drawViewport(){
+	var targetCanvas = document.getElementById("canvas1").getContext("2d");
+	baseMap.blit(targetCanvas,Viewport);
+}
+
+function drawMap(){
+	drawViewport();
+	updateViewportStats();
+}
+
+function init(){
+	baseMap = new HexMap({
+		strokeStyle:"#000000",
+		rows:10,
+		columns:10
+	});
+	drawViewport();
+	document.getElementById("canvas1").addEventListener("mousemove",function(e){
+		var x=0,y=0;
+		if(typeof(e.offsetX)=="undefined"||typeof(e.offsetY)=="undefined") { //DAMM YOU FIREFOX
+			var mozLeft=e.clientX;
+			var mozTop=e.clientY;
+			var target=e.target;
+			mozLeft = mozLeft - target.offsetLeft + window.scrollX;
+			mozTop = mozTop - target.offsetTop + window.scrollY;
+			var parent = target.offsetParent;
+			while(parent){
+				mozLeft = mozLeft - parent.offsetLeft;
+				mozTop = mozTop - parent.offsetTop;
+				parent = parent.offsetParent;
+			}
+			x = mozLeft;
+			y = mozTop;
+		}else{
+			x=e.offsetX;
+			y=e.offsetY;
+		}
+		document.getElementById("coordx").innerHTML=x;
+		document.getElementById("coordy").innerHTML=y;
+		var mapCoords = baseMap.getHexCoordinate(x,y,Viewport);
+		//document.getElementById("coordr").innerHTML=mapCoords.r;
+		//document.getElementById("coordc").innerHTML=mapCoords.c;
+		//document.getElementById("coordColor").innerHTML=mapCoords.color;
+		document.getElementById("hexcoordinate").innerHTML = (mapCoords.c<0||mapCoords.r<0)?"Invalid":((mapCoords.c<10?"0":"")+mapCoords.c+(mapCoords.r<10?"0":"")+mapCoords.r);
+		/*
+		var canvasEle = document.getElementById("canvas1");
+		var ctx = canvasEle.getContext("2d");
+		ctx.lineWidth = 0;
+		ctx.fillStyle=mapCoords.color;
+		ctx.fillRect(x,y,1,1);
+		*/
+	},false);
+	var upButton=document.getElementById("upButton");
+	
+	upButton.addEventListener("click",function(e){
+			clearInputStatusButtons();
+			InputQueue.push({action:"translateY",value:-10});
+		})
+	upButton.addEventListener("mousedown",function(e){
+			clearInputStatusButtons();
+			InputStatus.upButtonPressed=true;
+		})
+	upButton.addEventListener("mouseup",function(e){
+			clearInputStatusButtons();
+			InputStatus.upButtonPressed=false;
+		})
+	var downButton=document.getElementById("downButton");
+	downButton.addEventListener("click",function(e){
+			clearInputStatusButtons();
+			InputQueue.push({action:"translateY",value:10});
+		})
+	downButton.addEventListener("mousedown",function(e){
+			clearInputStatusButtons();
+			InputStatus.downButtonPressed=true;
+		})
+	downButton.addEventListener("mouseup",function(e){
+			clearInputStatusButtons();
+			InputStatus.downButtonPressed=false;
+		})
+	var leftButton=document.getElementById("leftButton");
+	leftButton.addEventListener("click",function(e){
+			clearInputStatusButtons();
+			InputQueue.push({action:"translateX",value:-10});
+		});
+	leftButton.addEventListener("mousedown",function(e){
+			clearInputStatusButtons();
+			InputStatus.leftButtonPressed=true;
+		});
+	leftButton.addEventListener("mouseup",function(e){
+			clearInputStatusButtons();
+			InputStatus.leftButtonPressed=false;
+		});
+	var rightButton=document.getElementById("rightButton");
+	rightButton.addEventListener("click",function(e){
+			clearInputStatusButtons();
+			InputQueue.push({action:"translateX",value:10});
+		});
+	rightButton.addEventListener("mousedown",function(e){
+			clearInputStatusButtons();
+			InputStatus.rightButtonPressed=true;
+		});
+	rightButton.addEventListener("mouseup",function(e){
+			clearInputStatusButtons();
+			InputStatus.rightButtonPressed=false;
+		});
+	var zoomInButton=document.getElementById("zoomInButton");
+	zoomInButton.addEventListener("click",function(e){
+			clearInputStatusButtons();
+			InputQueue.push({action:"transformScale",value:5});
+		});
+	var zoomOutButton=document.getElementById("zoomOutButton");
+	zoomOutButton.addEventListener("click",function(e){
+			clearInputStatusButtons();
+			InputQueue.push({action:"transformScale",value:-5});
+		});
+	runLoop();
+}
+function updateViewportStats(){
+	document.getElementById("viewport.xmin").innerHTML = Viewport.xmin;
+	document.getElementById("viewport.ymin").innerHTML = Viewport.ymin;
+	document.getElementById("viewport.width").innerHTML = Viewport.width;
+	document.getElementById("viewport.height").innerHTML = Viewport.height;
+	document.getElementById("viewport.scale").innerHTML = Viewport.scale;
+}
+
+function processInterfaceInput(){
+	while(InputQueue.length){
+		var inputTask=InputQueue.shift();
+		if(inputTask&&inputTask.action){
+			var action = inputTask.action;
+			switch(action){
+				case "translateY":
+					Viewport.ymin=Viewport.ymin+inputTask.value;
+					break;
+				case "translateX":
+					Viewport.xmin=Viewport.xmin+inputTask.value;
+					break;
+				case "transformScale":
+					Viewport.scale=Viewport.scale+inputTask.value;
+					break;
+			}
+		}
+	}
+	if(InputStatus.upButtonPressed){
+		Viewport.ymin=Viewport.ymin-10;
+	}
+	if(InputStatus.downButtonPressed){
+		Viewport.ymin=Viewport.ymin+10;
+	}
+	if(InputStatus.leftButtonPressed){
+		Viewport.xmin=Viewport.xmin-10;;
+	}
+	if(InputStatus.rightButtonPressed){
+		Viewport.xmin=Viewport.xmin+10;
+	}
+}
+function runLoop(){
+	processInterfaceInput();
+	var mapDimensions = baseMap.getMapSize();
+	var maximumXmin=mapDimensions.width-Viewport.width;
+	if(maximumXmin<0){
+		maximumXmin=0;
+	}
+	var maximumYmin=mapDimensions.height-Viewport.height;
+	if(maximumYmin<0){
+		maximumYmin=0;
+	}
+	if(Viewport.xmin<0){
+		Viewport.xmin=0;
+	}else if(Viewport.xmin>maximumXmin){
+		Viewport.xmin = maximumXmin;
+	}
+	if(Viewport.ymin<0){
+		Viewport.ymin=0;
+	} else if(Viewport.ymin>maximumYmin){
+		Viewport.ymin = maximumYmin;
+	}
+	drawViewport();
+	updateViewportStats();
+	window.setTimeout(runLoop,20);
+}
+		</script>
+	</head>
+	<body onload="init()">
+		<canvas id="canvas1" width="500px" height="300px"></canvas>
+		<div id="mapToolbar">
+			<div>
+				<table>
+					<tr>
+						<td colspan="3" style="text-align: center">
+							<button id="zoomInButton"  style="display:inline;">+</button>
+						</td>
+					</tr>
+					<tr>
+						<td colspan="3" style="text-align: center">
+							<button id="zoomOutButton"  style="display:inline;">-</button>
+						</td>
+					</tr>
+					<tr>
+						<td colspan="3" style="text-align: center">
+							<button id="upButton" style="display:inline;">^</button>
+						</td>
+					</tr>
+					<tr>
+						<td><button id="leftButton">&lt;</button></td>
+						<td></td>
+						<td><button id="rightButton">&gt;</button></td>
+					</tr>
+					<tr>
+						<td colspan="3" style="text-align: center">
+							<button id="downButton" style="display:inline;">V</button>
+						</td>
+					</tr>
+				</table>
+			</div>
+		</div>
+		<div class="clear coords">
+			<div style="float:left;">
+				<table border="1" cellpadding="5" cellspacing="0">
+					<thead>
+						<tr><th colspan="4">Viewport</th></tr>
+					</thead>
+					<tbody>
+						<tr><td>x-min</td><td><span id="viewport.xmin"></span></td><td>width</td><td><span id="viewport.width"></span></td></tr>
+						<tr><td>y-min</td><td><span id="viewport.ymin"></span></td><td>height</td><td><span id="viewport.height"></span></td></tr>
+						<tr><td>scale</td><td colspan="3"><span id="viewport.scale"></span></td></tr>
+					</tbody>
+				</table>
+			</div>
+			<div style="float:left">
+			<table border="1" cellpadding="5" cellspacing="0">
+				<thead>
+					<th colspan="2">Cursor Position</th>
+				</thead>
+				<tbody>
+					<tr>
+						<th>Hex</th><td><span id="hexcoordinate"></span></td>
+					</tr>
+					<tr>
+						<th>Viewport</th><td>(x:<span id="coordx"></span>,&nbsp;y:<span id="coordy"></span>)</td>
+					</tr>
+				</tbody>
+			</table>
+			</div>
+			<div style="clear:left;"></div>
+		</div>
+	</body>
+</html>
